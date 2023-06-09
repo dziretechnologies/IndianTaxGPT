@@ -1,0 +1,51 @@
+from langchain import HuggingFaceHub
+from langchain.chains import RetrievalQA
+from langchain.vectorstores import Chroma
+from langchain.embeddings import HuggingFaceInstructEmbeddings
+from constants import CHROMA_SETTINGS, PERSIST_DIRECTORY
+import os
+from constants import CHROMA_SETTINGS
+from flask import Flask, request, jsonify,render_template
+from flask_cors import CORS
+
+
+# Here we are setting chatbot
+os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
+device = 'cpu'
+embeddings = HuggingFaceInstructEmbeddings(
+    model_name="hkunlp/instructor-xl", model_kwargs={"device": device})
+# load the vectorstore
+db = Chroma(persist_directory=PERSIST_DIRECTORY,
+            embedding_function=embeddings, client_settings=CHROMA_SETTINGS)
+retriever = db.as_retriever()
+repo_id = "tiiuae/falcon-7b-instruct"
+llm = HuggingFaceHub(repo_id=repo_id,
+                     model_kwargs={"temperature": 0.6, "max_new_tokens": 500})
+qa = RetrievalQA.from_chain_type(
+    llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
+
+
+
+# Here we are setting Flask Server
+app = Flask(__name__,static_folder='./build')
+CORS(app)
+
+@app.route('/query')
+def index():
+    query = request.args.get('question')
+    res = qa(query)
+    answer, docs = res['result'], res['source_documents']
+    return jsonify({"status" : True,"code" : 200,"answer": answer})
+    
+# Serve React App
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(app.static_folder + '/' + path):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
+
+
+if __name__ == "__main__":
+    app.run()
